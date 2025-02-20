@@ -1143,34 +1143,47 @@ func (s *Server) GenerateRoutes() http.Handler {
 		allowedHostsMiddleware(s.addr),
 	)
 
-	r.POST("/api/pull", s.PullHandler)
-	r.POST("/api/generate", s.GenerateHandler)
-	r.POST("/api/chat", s.ChatHandler)
-	r.POST("/api/embed", s.EmbedHandler)
-	r.POST("/api/embeddings", s.EmbeddingsHandler)
-	r.POST("/api/create", s.CreateHandler)
-	r.POST("/api/push", s.PushHandler)
-	r.POST("/api/copy", s.CopyHandler)
-	r.DELETE("/api/delete", s.DeleteHandler)
-	r.POST("/api/show", s.ShowHandler)
-	r.POST("/api/blobs/:digest", s.CreateBlobHandler)
-	r.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
-	r.GET("/api/ps", s.PsHandler)
+	key := os.Getenv("OLLAMA_API_KEY")
+	authMiddleware := func(ctx *gin.Context) {
+		apiKey := ctx.GetHeader("X-API-Key")
+		if key != "" && apiKey != key && ctx.Request.Host != "0.0.0.0:11434" {
+			ctx.AbortWithStatusJSON(403, gin.H{"message": "Forbidden"})
+			return
+		}
+
+		ctx.Next()
+	}
+
+	a := r.Group("/api", authMiddleware)
+	a.POST("/pull", s.PullHandler)
+	a.POST("/generate", s.GenerateHandler)
+	a.POST("/chat", s.ChatHandler)
+	a.POST("/embed", s.EmbedHandler)
+	a.POST("/embeddings", s.EmbeddingsHandler)
+	a.POST("/create", s.CreateHandler)
+	a.POST("/push", s.PushHandler)
+	a.POST("/copy", s.CopyHandler)
+	a.DELETE("/delete", s.DeleteHandler)
+	a.POST("/show", s.ShowHandler)
+	a.POST("/blobs/:digest", s.CreateBlobHandler)
+	a.HEAD("/blobs/:digest", s.HeadBlobHandler)
+	a.GET("/ps", s.PsHandler)
 
 	// Compatibility endpoints
-	r.POST("/v1/chat/completions", openai.ChatMiddleware(), s.ChatHandler)
-	r.POST("/v1/completions", openai.CompletionsMiddleware(), s.GenerateHandler)
-	r.POST("/v1/embeddings", openai.EmbeddingsMiddleware(), s.EmbedHandler)
-	r.GET("/v1/models", openai.ListMiddleware(), s.ListHandler)
-	r.GET("/v1/models/:model", openai.RetrieveMiddleware(), s.ShowHandler)
+	v1 := r.Group("/v1", authMiddleware)
+	v1.POST("/chat/completions", openai.ChatMiddleware(), s.ChatHandler)
+	v1.POST("/completions", openai.CompletionsMiddleware(), s.GenerateHandler)
+	v1.POST("/embeddings", openai.EmbeddingsMiddleware(), s.EmbedHandler)
+	v1.GET("/models", openai.ListMiddleware(), s.ListHandler)
+	v1.GET("/models/:model", openai.RetrieveMiddleware(), s.ShowHandler)
 
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		r.Handle(method, "/", func(c *gin.Context) {
-			c.String(http.StatusOK, "Ollama is running")
+			c.String(http.StatusOK, "running")
 		})
 
-		r.Handle(method, "/api/tags", s.ListHandler)
-		r.Handle(method, "/api/version", func(c *gin.Context) {
+		a.Handle(method, "/tags", s.ListHandler)
+		a.Handle(method, "/version", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"version": version.Version})
 		})
 	}
